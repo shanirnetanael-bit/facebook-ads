@@ -272,29 +272,56 @@ class Checklist(Layer):
 
 
 class EndCard(Layer):
-    """Freeze-frame outro: picture blurs and darkens to navy; name, gold rule and subtitle rise in."""
+    """Freeze-frame outro: picture blurs and darkens to navy; name, gold rule and subtitle rise in,
+    then an optional call to action: a white line + a gold button that breathes gently."""
 
-    def __init__(self, name, sub, font, t_in, navy=(11, 27, 52), gold=(212, 175, 55, 255), white=(255, 255, 255, 255)):
+    def __init__(self, name, sub, font, t_in, cta=None, navy=(11, 27, 52), gold=(212, 175, 55, 255),
+                 white=(255, 255, 255, 255)):
         self.name, self.nm = render_text(name, font, 100, white, 800)
         self.sub, self.sm = render_text(sub, font, 50, gold, 600)
-        self.rule = rounded_rect(300, 6, 3, gold)
         self.t_in = t_in
         self.navy = np.array(navy[::-1], np.float32)
+        self.gold = gold
+        self.cta = None
+        if cta:
+            line1, line2 = cta
+            self.cta = (render_text(line1, font, 62, white, 700),
+                        render_text(line2, font, 62, navy + (255,), 800))
+            self.btn = rounded_rect(int(self.cta[1][1]["ink_w"] + 110), 118, 59, gold)
+        self.base_y = 720 if cta else 900
         self.tail = 0
 
     def active(self, t):
         return t >= self.t_in
 
+    @staticmethod
+    def _centre(meta, patch):
+        return ((meta["ink_x"] + meta["ink_w"] / 2) / patch.shape[1], meta["baseline"] / patch.shape[0])
+
     def draw(self, frame, t, info):
         u = ease_out(ramp(t, self.t_in, 0.45))
-        sig = 1 + 22 * u
-        blurred = cv2.GaussianBlur(frame, (0, 0), sig)
-        f = blurred.astype(np.float32) * (1 - 0.8 * u) + self.navy * 0.8 * u
+        blurred = cv2.GaussianBlur(frame, (0, 0), 1 + 22 * u)
+        f = blurred.astype(np.float32) * (1 - 0.82 * u) + self.navy * 0.82 * u
         frame[:] = np.clip(f, 0, 255).astype(np.uint8)
-        for patch, meta, base, d in ((self.name, self.nm, 900, 0.25), (self.sub, self.sm, 1035, 0.55)):
+        y = self.base_y
+        for patch, meta, base, d in ((self.name, self.nm, y, 0.25), (self.sub, self.sm, y + 135, 0.55)):
             p = ease_out(ramp(t, self.t_in + d, 0.45))
             over(frame, patch, 540, base + (1 - p) * 40, opacity=ramp(t, self.t_in + d, 0.25),
-                 anchor=((meta["ink_x"] + meta["ink_w"] / 2) / patch.shape[1], meta["baseline"] / patch.shape[0]))
+                 anchor=self._centre(meta, patch))
         rp = ease_out(ramp(t, self.t_in + 0.4, 0.5))
         if rp > 0.02:
-            over(frame, rounded_rect(max(4, int(300 * rp)), 6, 3, (212, 175, 55, 255)), 540, 950)
+            over(frame, rounded_rect(max(4, int(300 * rp)), 6, 3, self.gold), 540, y + 50)
+        if self.cta:
+            (l1, m1), (l2, m2) = self.cta
+            t1 = self.t_in + 0.85
+            p = ease_out(ramp(t, t1, 0.45))
+            over(frame, l1, 540, y + 330 + (1 - p) * 40, opacity=ramp(t, t1, 0.25), anchor=self._centre(m1, l1))
+            t2 = t1 + 0.3
+            bp = ease_out_back(ramp(t, t2, 0.4))
+            if bp > 0:
+                breathe = 1 + 0.025 * math.sin(2 * math.pi * 0.9 * max(t - t2 - 0.4, 0))
+                sc = (0.8 + 0.2 * bp) * breathe
+                a = ramp(t, t2, 0.2)
+                cy = y + 465
+                over(frame, self.btn, 540, cy, opacity=a, scale=sc)
+                over(frame, l2, 540, cy + 0.36 * 62 * sc, opacity=a, scale=sc, anchor=self._centre(m2, l2))

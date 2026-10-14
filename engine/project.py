@@ -24,6 +24,7 @@ class Project:
         self.layers = []          # callables layer(frame, t_out, ctx, info) -> frame
         self.sfx = []             # (out_time, samples, gain_db)
         self.tm = None
+        self.music = None         # dict(under_db=..., open_db=..., bpm=...) -> original synthesized bed, ducked
         self.camera = None        # engine.camera.Camera, applied to picture and mask alike
 
     # --- timeline ----------------------------------------------------------------------------
@@ -47,7 +48,14 @@ class Project:
     def prepare_audio(self):
         raw = os.path.join(self.workdir, "edit_audio_raw.wav")
         self.audio_path = os.path.join(self.workdir, "edit_audio.wav")
-        track = mix_sfx(build_audio(self.tm, self.src_audio), self.sfx)
+        voice = build_audio(self.tm, self.src_audio)
+        track = mix_sfx(voice.copy(), self.sfx)
+        if self.music is not None:
+            from .music import compose, duck
+            opts = dict(self.music)
+            bed = compose(self.tm.duration, bpm=opts.pop("bpm", 84))
+            n = min(len(bed), len(track))
+            track[:n] += duck(bed[:n], voice[:n], **opts)
         write_wav(raw, track)
         loudnorm_file(raw, self.audio_path)
 

@@ -1,5 +1,6 @@
 """Reel 01 - nursing-care insurance (פוליסת סיעוד).
 v1: silence cuts + animated captions.
+v3: + original background music (ducked under the voice) + call to action on the end card.
 v2: + transcript fixes, camera moves, headlines behind the person, name card, stamp, money card,
     checklist, end card and sound design - every effect anchored to its word number (see words.md).
 
@@ -54,7 +55,7 @@ CAPTION_STYLE = {
 }
 
 
-def build(version=2):
+def build(version=3):
     p = Project(SOURCE, WORK, CORRECTIONS)
     p.cut_silences(keep_gap=0.14, pad_before=0.06, pad_after=0.08, xfade=0.10)
     if version < 2:
@@ -65,7 +66,7 @@ def build(version=2):
 
     w = p.w                                   # w(i) = output time of word i
     speech_end = p.tm.duration
-    END = 2.4
+    END = 3.6 if version >= 3 else 2.4
     p.tm.add_freeze(p.tm.segs[-1].src_end - 0.04, END)          # outro hold on the last frame
     t_end = speech_end
 
@@ -107,7 +108,8 @@ def build(version=2):
     caption_words = [x for x in p.words_out() if x["i"] < 79]   # the checklist takes over from word 79
     caps = Captions(caption_words, dict(CAPTION_STYLE, emph=EMPHASIS), p.W, p.H)
     p.layers.append(lambda frame, t, ctx, info: caps.draw(frame, t))
-    p.layers.append(EndCard("שניר נתנאל", "עורך דין · תביעות ביטוח", FONT, t_in=t_end))
+    cta = ("מוזמנים ליצור קשר", "לשיחת ייעוץ ללא עלות") if version >= 3 else None
+    p.layers.append(EndCard("שניר נתנאל", "עורך דין · תביעות ביטוח", FONT, t_in=t_end, cta=cta))
 
     # --- sound design (levels in dB, under the voice) -------------------------------------------
     whoosh = sfx.whoosh()
@@ -126,12 +128,15 @@ def build(version=2):
         (t_end, sfx.whoosh(0.6, 300, 3000), -20),
         (t_end + 0.3, sfx.shimmer(1.4), -19),
     ]
+    if version >= 3:
+        p.sfx.append((t_end + 1.15, sfx.pop(800, 500, 0.09), -22))   # CTA button lands
+        p.music = dict(bpm=84, under_db=-23.0, open_db=-14.0)
     p.prepare_audio()
     return p
 
 
 if __name__ == "__main__":
-    version = int(os.environ.get("VERSION", "2"))
+    version = int(os.environ.get("VERSION", "3"))
     p = build(version)
     print(p.tm.describe())
     os.makedirs(OUT, exist_ok=True)
