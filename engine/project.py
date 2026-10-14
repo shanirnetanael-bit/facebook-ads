@@ -1,0 +1,64 @@
+"""Base project: wires source video + words + TimeMap + layers into frame_at(t)."""
+import json
+import os
+
+from .audio import build_audio, load_audio, loudnorm_file, mix_sfx, write_wav
+from .mask import MaskReader
+from .render import SourceReader, blend_sources
+from .timemap import TimeMap, detect_speech
+
+
+class Project:
+    W, H, fps = 1080, 1920, 30
+
+    def __init__(self, source, workdir, corrections=None):
+        self.source = source
+        self.workdir = workdir
+        self.src_audio = load_audio(source)
+        self.src_duration = len(self.src_audio) / 48000
+        self.speech = detect_speech(self.src_audio, 48000)
+        words = json.load(open(os.path.join(workdir, "words.json"), encoding="utf-8"))
+        for w in words:
+            w["text"] = (corrections or {}).get(w["i"], w["word"])
+        self.words = words
+        self.layers = []          # callables layer(frame, t_out, ctx, info) -> frame
+        self.sfx = []             # (out_time, samples, gain_db)
+        self.tm = None
+
+    # --- timeline ----------------------------------------------------------------------------
+    def cut_silences(self, **kw):
+        self.tm = TimeMap.from_speech(self.speech, self.src_duration, **kw)
+        return self.tm
+
+    def w(self, i, edge="start"):
+        """Output time of word #i (as in the words table)."""
+        return self.tm.src_to_out(self.words[i][edge])
+
+    def words_out(self):
+        return [{"i": w["i"], "text": w["text"], "start": self.w(w["i"]), "end": self.w(w["i"], "end")}
+                for w in self.words if w["text"]]
+
+    @property
+    def duration(self):
+        return self.tm.duration
+
+    # --- render hooks -------------------------------------------------------------------------
+    def prepare_audio(self):
+        raw = os.path.join(self.workdir, "edit_audio_raw.wav")
+        self.audio_path = os.path.join(self.workdir, "edit_audio.wav")
+        track = mix_sfx(build_audio(self.tm, self.src_audio), self.sfx)
+        write_wav(raw, track)
+        loudnorm_file(raw, self.audio_path)
+
+    def open_ctx(self):
+        mask_path = os.path.join(self.workdir, "mask.mkv")
+        return {"src": SourceReader(self.source),
+                "mask": MaskReader(mask_path) if os.path.exists(mask_path) else None}
+
+    def frame_at(self, t, ctx):
+        sources = self.tm.sources_at(t)
+        frame = blend_sources(ctx["src"], sources)
+        info = {"sources": sources, "src_t": sources[-1][0] if len(sources) == 1 else max(sources, key=lambda s: s[1])[0]}
+        for layer in self.layers:
+            frame = layer(frame, t, ctx, info)
+        return frame
