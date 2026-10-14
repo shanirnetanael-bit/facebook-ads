@@ -145,7 +145,7 @@ def build():
     caps = Captions(caption_words, dict(CAPTION_STYLE, emph=EMPHASIS), p.W, p.H)
     p.layers.append(lambda frame, t, ctx, info: caps.draw(frame, t))
     p.layers.append(EndCard("שניר נתנאל", "עורך דין · מיצוי זכויות", FONT, t_in=t_end,
-                            cta=("השאירו פרטים למטה", "לחוות דעת אישית")))
+                            cta=("השאירו פרטים למטה", "לייעוץ ללא עלות")))
 
     # --- sound design (dB, all well under the voice) --------------------------------------------
     wh = sfx.whoosh()
@@ -188,8 +188,8 @@ if __name__ == "__main__":
     p = build()
     print(p.tm.describe())
     os.makedirs(OUT, exist_ok=True)
-    out = os.path.join(OUT, sys.argv[1] if len(sys.argv) > 1 else "reel02_v1.mp4")
+    out = os.path.join(OUT, sys.argv[1] if len(sys.argv) > 1 else "reel02_v2.mp4")
     render(p, out)
     print("rendered", out)
-    for page in contact_sheet(out, os.path.join(WORK, "contact_v1")):
+    for page in contact_sheet(out, os.path.join(WORK, "contact_v2")):
         print("contact", page)
