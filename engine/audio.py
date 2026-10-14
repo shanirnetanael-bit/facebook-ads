@@ -1,5 +1,6 @@
 """Audio: load source audio, cut it by the same TimeMap as the picture (equal-power crossfades on soft
 cuts, silence on freezes), mix sound effects at output times, write a wav for the final mux."""
+import os
 import subprocess
 
 import numpy as np
@@ -12,6 +13,33 @@ SR = 48000
 def load_audio(path, sr=SR):
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"],
                          capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32).copy()
+
+
+RNNOISE = os.environ.get("RNNOISE_MODEL", "/opt/vtools/models/rnnoise-sh.rnnn")
+
+
+def voice_chain(denoise_mix=0.9):
+    """Dialogue clean-up: rumble high-pass -> RNNoise speech denoiser -> de-mud / presence / air EQ ->
+    mild de-esser -> soft compression -> soft expander (room tone between phrases down ~12 dB).
+    Loudness is set later (two-pass loudnorm) on the final mix."""
+    chain = ["highpass=f=75:poles=2"]
+    if os.path.exists(RNNOISE):
+        chain.append(f"arnndn=m={RNNOISE}:mix={denoise_mix}")
+    else:
+        chain.append("afftdn=nr=12:nf=-45:tn=1")
+    chain += ["equalizer=f=220:t=q:w=1.0:g=-2.5",        # boxiness of a small room
+              "equalizer=f=3200:t=q:w=1.2:g=3",          # presence / intelligibility
+              "equalizer=f=9500:t=h:w=2000:g=1.5",       # air
+              "deesser=i=0.3:m=0.5:f=0.5",
+              "acompressor=threshold=0.1:ratio=2:attack=10:release=150:knee=6",
+              "agate=threshold=0.004:ratio=2:range=0.25:attack=5:release=200"]
+    return ",".join(chain)
+
+
+def load_clean_voice(path, sr=SR):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-af", voice_chain(), "-ar", str(sr),
+                          "-f", "f32le", "-"], capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.float32).copy()
 
 
@@ -63,16 +91,28 @@ def write_wav(path, samples, sr=SR):
                     "-c:a", "pcm_s24le", path], input=pcm.astype(np.float32).tobytes(), check=True)
 
 
-def loudnorm_file(src, dst, target=-14.0, tp=-1.0, lra=11.0):
-    """Two-pass EBU R128 loudness normalisation (Instagram/Reels ~ -14 LUFS)."""
+def _measure(src, target, tp, lra):
     import json
     r = subprocess.run(["ffmpeg", "-hide_banner", "-i", src, "-af",
                         f"loudnorm=I={target}:TP={tp}:LRA={lra}:print_format=json", "-f", "null", "-"],
                        capture_output=True, text=True)
     txt = r.stderr
-    m = json.loads(txt[txt.rindex("{"):txt.rindex("}") + 1])
+    return json.loads(txt[txt.rindex("{"):txt.rindex("}") + 1])
+
+
+def loudnorm_file(src, dst, target=-14.0, tp=-1.0, lra=11.0):
+    """Loudness for Instagram/Reels (~ -14 LUFS, true peak -1 dB): gain + transparent peak limiter first
+    (so the target is reachable without clipping), then a two-pass linear EBU R128 normalisation."""
+    m = _measure(src, target, tp, lra)
+    gain = target - float(m["input_i"])
+    limited = dst + ".lim.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-af",
+                    f"volume={gain + 1.5:.2f}dB,alimiter=limit=0.66:attack=3:release=60:level=disabled",
+                    "-ar", str(SR), "-c:a", "pcm_s24le", limited], check=True)
+    m = _measure(limited, target, tp, lra)
     af = (f"loudnorm=I={target}:TP={tp}:LRA={lra}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
           f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-af", af, "-ar", str(SR), "-c:a", "pcm_s24le", dst],
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", limited, "-af", af, "-ar", str(SR), "-c:a", "pcm_s24le", dst],
                    check=True)
+    os.remove(limited)
     return dst

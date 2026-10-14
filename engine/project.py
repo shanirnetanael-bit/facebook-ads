@@ -2,7 +2,7 @@
 import json
 import os
 
-from .audio import build_audio, load_audio, loudnorm_file, mix_sfx, write_wav
+from .audio import build_audio, load_audio, load_clean_voice, loudnorm_file, mix_sfx, write_wav
 from .mask import MaskReader
 from .render import SourceReader, blend_sources
 from .timemap import TimeMap, detect_speech
@@ -11,12 +11,13 @@ from .timemap import TimeMap, detect_speech
 class Project:
     W, H, fps = 1080, 1920, 30
 
-    def __init__(self, source, workdir, corrections=None):
+    def __init__(self, source, workdir, corrections=None, clean_voice=False):
         self.source = source
         self.workdir = workdir
-        self.src_audio = load_audio(source)
-        self.src_duration = len(self.src_audio) / 48000
-        self.speech = detect_speech(self.src_audio, 48000)
+        raw = load_audio(source)
+        self.src_duration = len(raw) / 48000
+        self.speech = detect_speech(raw, 48000)          # same VAD the transcription was snapped to
+        self.src_audio = load_clean_voice(source)[:len(raw)] if clean_voice else raw
         words = json.load(open(os.path.join(workdir, "words.json"), encoding="utf-8"))
         for w in words:
             w["text"] = (corrections or {}).get(w["i"], w["word"])
@@ -51,9 +52,13 @@ class Project:
         voice = build_audio(self.tm, self.src_audio)
         track = mix_sfx(voice.copy(), self.sfx)
         if self.music is not None:
-            from .music import compose, duck
+            from .music import carve_for_voice, compose, compose_classical, duck
             opts = dict(self.music)
-            bed = compose(self.tm.duration, bpm=opts.pop("bpm", 84))
+            style, bpm = opts.pop("style", "pads"), opts.pop("bpm", None)
+            if style == "classical":
+                bed = carve_for_voice(compose_classical(self.tm.duration, bpm=bpm or 112))
+            else:
+                bed = compose(self.tm.duration, bpm=bpm or 84)
             n = min(len(bed), len(track))
             track[:n] += duck(bed[:n], voice[:n], **opts)
         write_wav(raw, track)

@@ -1,10 +1,13 @@
-"""Word-level transcription with whisper.cpp.
+"""Word-level transcription.
 
-Preferred model for Hebrew: ivrit.ai (e.g. ivrit-ai/whisper-large-v3-turbo-ggml). Set WHISPER_MODEL to its path.
-Steps: extract 16 kHz mono wav -> whisper-cli full JSON (per-token offsets) -> merge tokens into words.
+Two backends:
+  * whisper.cpp + ivrit.ai Hebrew model (preferred; set WHISPER_MODEL) - used when the ggml file exists.
+    Steps: 16 kHz wav -> whisper-cli full JSON (per-token offsets) -> merge tokens into words -> refine().
+  * engine.asr: local ONNX Whisper large-v3-turbo with cross-attention/DTW word times (fallback, e.g. when
+    huggingface.co is not reachable to fetch the ivrit.ai model) -> snap_to_speech().
 
-Usage:  python -m engine.transcribe input/source.mp4 work/
-        (or, if work/transcript_raw.json already exists, only re-builds words.json / words.md)
+Usage:  python -m engine.transcribe input/source.mp4 work/ ["context prompt: names, domain terms"]
+        (if work/transcript_raw.json or work/asr_raw.json already exists, only re-builds words.json / words.md)
 """
 import json
 import os
@@ -98,6 +101,29 @@ def refine(words, speech, min_dur=0.12):
     return words
 
 
+def snap_to_speech(words, speech, max_move=1.0):
+    """Pull word edges that fall in silence onto the nearest speech edge (DTW times are ~20-40 ms granular
+    but a word can swallow a leading/trailing pause)."""
+    def inside(t):
+        return any(a <= t <= b for a, b in speech)
+    for w in words:
+        if not inside(w["start"]):
+            nxt = [a for a, b in speech if w["start"] < a < w["end"]]
+            if nxt and nxt[0] - w["start"] <= max_move:
+                w["start"] = nxt[0]
+        if not inside(w["end"]):
+            prv = [b for a, b in speech if w["start"] < b < w["end"]]
+            if prv and w["end"] - prv[-1] <= max_move:
+                w["end"] = prv[-1]
+    for prev, w in zip(words, words[1:]):
+        w["start"] = max(w["start"], prev["start"] + 0.05)
+        w["end"] = max(w["end"], w["start"] + 0.08)
+    for i, w in enumerate(words):
+        w["i"] = i
+        w["start"], w["end"], w["p"] = round(w["start"], 2), round(w["end"], 2), round(w["p"], 2)
+    return words
+
+
 def write_table(words, path):
     lines = ["| # | מילה | התחלה (שנ') | סוף (שנ') |", "|---|---|---|---|"]
     for w in words:
@@ -106,10 +132,14 @@ def write_table(words, path):
 
 
 def build(workdir, speech=None):
-    raw = json.load(open(os.path.join(workdir, "transcript_raw.json"), encoding="utf-8"))
-    words = tokens_to_words(raw)
-    if speech is not None:
-        words = refine(words, speech)
+    onnx_raw = os.path.join(workdir, "asr_raw.json")
+    if os.path.exists(onnx_raw):
+        words = snap_to_speech(json.load(open(onnx_raw, encoding="utf-8"))["words"], speech or [])
+    else:
+        raw = json.load(open(os.path.join(workdir, "transcript_raw.json"), encoding="utf-8"))
+        words = tokens_to_words(raw)
+        if speech is not None:
+            words = refine(words, speech)
     json.dump(words, open(os.path.join(workdir, "words.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     write_table(words, os.path.join(workdir, "words.md"))
     return words
@@ -117,9 +147,17 @@ def build(workdir, speech=None):
 
 if __name__ == "__main__":
     video, workdir = sys.argv[1], sys.argv[2]
-    if not os.path.exists(os.path.join(workdir, "transcript_raw.json")):
-        run_whisper(video, workdir)
+    prompt = sys.argv[3] if len(sys.argv) > 3 else None
     from .audio import load_audio
     from .timemap import detect_speech
-    for w in build(workdir, detect_speech(load_audio(video), 48000)):
+    speech = detect_speech(load_audio(video), 48000)
+    have_raw = any(os.path.exists(os.path.join(workdir, f)) for f in ("transcript_raw.json", "asr_raw.json"))
+    if not have_raw and os.path.exists(WHISPER_MODEL):
+        run_whisper(video, workdir)
+    elif not have_raw:
+        from . import asr
+        ws = asr.transcribe(load_audio(video, 16000), speech, prompt=prompt)
+        json.dump({"words": ws}, open(os.path.join(workdir, "asr_raw.json"), "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+    for w in build(workdir, speech):
         print(w["i"], w["start"], w["end"], w["p"], w["word"])

@@ -231,13 +231,13 @@ class Checklist(Layer):
     each chip pops in on its word and its gold check lands a beat later."""
 
     def __init__(self, header, items, font, t_header, t_out, top=1170, navy=(11, 27, 52, 235),
-                 gold=(212, 175, 55, 255), white=(255, 255, 255, 255)):
+                 gold=(212, 175, 55, 255), white=(255, 255, 255, 255), chip_w=400, item_size=54):
         self.hdr, self.hm = render_text(header, font, 54, gold, 800, shadow=(0, 0, 0, 120), shadow_blur=8)
         self.items = []
         for text, t0 in items:
-            self.items.append((render_text(text, font, 54, white, 700), t0))
+            self.items.append((render_text(text, font, item_size, white, 700), t0))
         self.badge = check_badge(58, gold, navy[:3] + (255,))
-        self.chip_w, self.chip_h = 400, 100
+        self.chip_w, self.chip_h = chip_w, 100
         self.chip = rounded_rect(self.chip_w, self.chip_h, 50, navy)
         self.hdr_pill = rounded_rect(int(self.hm["ink_w"] + 70), 84, 42, navy)
         self.t_in, self.t_out, self.t_header = t_header, t_out, t_header
@@ -251,7 +251,7 @@ class Checklist(Layer):
         over(frame, self.hdr_pill, 540, self.top, opacity=ha, scale=0.85 + 0.15 * hp)
         over(frame, self.hdr, 540, self.top + 18, opacity=ha, scale=0.85 + 0.15 * hp,
              anchor=((self.hm["ink_x"] + self.hm["ink_w"] / 2) / self.hdr.shape[1], self.hm["baseline"] / self.hdr.shape[0]))
-        cols = [750, 330]
+        cols = [540 + self.chip_w / 2 + 12, 540 - self.chip_w / 2 - 12]
         for k, ((patch_meta), t0) in enumerate(self.items):
             patch, meta = patch_meta
             if t < t0 - 0.06:
@@ -325,3 +325,177 @@ class EndCard(Layer):
                 cy = y + 465
                 over(frame, self.btn, 540, cy, opacity=a, scale=sc)
                 over(frame, l2, 540, cy + 0.36 * 62 * sc, opacity=a, scale=sc, anchor=self._centre(m2, l2))
+
+
+def _rgba_canvas(w, h, draw_fn, s=4):
+    """Supersampled Pillow drawing -> RGBA uint8 patch."""
+    img = Image.new("RGBA", (w * s, h * s), (0, 0, 0, 0))
+    draw_fn(ImageDraw.Draw(img), s)
+    return np.asarray(img.resize((w, h), Image.LANCZOS)).copy()
+
+
+class Clock(Layer):
+    """Analogue clock that pops in, its hands sweep fast (time running out), then it pops out.
+    Pair with ticks/whoosh in the sound design."""
+
+    def __init__(self, t_in, t_out, x, y, d=230, navy=(11, 27, 52, 240), gold=(212, 175, 55, 255),
+                 white=(255, 255, 255, 255), turns=1.5):
+        self.face = _rgba_canvas(d, d, lambda g, s: (
+            g.ellipse((0, 0, d * s - 1, d * s - 1), fill=gold),
+            g.ellipse((10 * s, 10 * s, (d - 10) * s, (d - 10) * s), fill=navy),
+            [g.line([(d * s / 2 + math.sin(a) * (d / 2 - 24) * s, d * s / 2 - math.cos(a) * (d / 2 - 24) * s),
+                     (d * s / 2 + math.sin(a) * (d / 2 - (40 if k % 3 == 0 else 32)) * s,
+                      d * s / 2 - math.cos(a) * (d / 2 - (40 if k % 3 == 0 else 32)) * s)],
+                    fill=white, width=int((6 if k % 3 == 0 else 3) * s))
+             for k, a in enumerate(np.linspace(0, 2 * math.pi, 12, endpoint=False))]))
+        self.d, self.x, self.y = d, x, y
+        self.gold, self.white = gold, white
+        self.t_in, self.t_out, self.turns = t_in, t_out, turns
+        self.tail = 0.3
+
+    def _hand(self, length, width, angle, color):
+        d = self.d
+        c = d / 2
+        return _rgba_canvas(d, d, lambda g, s: g.line(
+            [(c * s, c * s), ((c + math.sin(angle) * length) * s, (c - math.cos(angle) * length) * s)],
+            fill=color, width=int(width * s), joint="curve"))
+
+    def draw(self, frame, t, info):
+        p = ease_out_back(ramp(t, self.t_in, 0.35), 2.2)
+        out = ease_in(ramp(t, self.t_out, 0.25))
+        sc = (0.4 + 0.6 * p) * (1 - 0.6 * out)
+        a = ramp(t, self.t_in, 0.12) * (1 - out)
+        if a <= 0:
+            return
+        u = ease_out(ramp(t, self.t_in, max(self.t_out - self.t_in, 0.3)))
+        wob = math.sin((t - self.t_in) * 9) * 4 * (1 - ramp(t, self.t_in, 0.8))
+        over(frame, rotate_rgba(self.face, wob) if abs(wob) > 0.2 else self.face, self.x, self.y, opacity=a, scale=sc)
+        r = self.d / 2
+        over(frame, self._hand(r * 0.45, 9, 2 * math.pi * (0.33 + u * self.turns / 12), self.white), self.x, self.y,
+             opacity=a, scale=sc)
+        over(frame, self._hand(r * 0.68, 6, 2 * math.pi * (0.0 + u * self.turns), self.gold), self.x, self.y,
+             opacity=a, scale=sc)
+        over(frame, rounded_rect(18, 18, 9, self.gold), self.x, self.y, opacity=a, scale=sc)
+
+
+class Timeline(Layer):
+    """RTL timeline: a gold line draws from right to left; each stop (label, t) pops a dot and a pill.
+    The last stop can be a '?' that wobbles (more changes to come)."""
+
+    def __init__(self, stops, font, t_out, y=300, x_right=930, x_left=150, navy=(11, 27, 52, 235),
+                 gold=(212, 175, 55, 255), white=(255, 255, 255, 255)):
+        self.stops = []
+        n = len(stops)
+        for k, (label, t0) in enumerate(stops):
+            x = x_right - (x_right - x_left) * (k + 0.5) / n
+            patch = render_text(label, font, 64, white if label != "?" else navy, 800)
+            pill = rounded_rect(int(patch[1]["ink_w"] + 60), 96, 48, navy if label != "?" else gold)
+            self.stops.append((x, t0, patch, pill))
+        self.y, self.x_right, self.x_left = y, x_right, x_left
+        self.gold = gold
+        self.t_in, self.t_out = stops[0][1] - 0.25, t_out
+        self.dot = _rgba_canvas(34, 34, lambda g, s: g.ellipse((0, 0, 34 * s - 1, 34 * s - 1), fill=gold))
+        self.tail = 0.35
+
+    def draw(self, frame, t, info):
+        fade = 1 - ramp(t, self.t_out, 0.3)
+        # the line reaches each stop as it is said
+        reach = self.x_right
+        prev_x, prev_t = self.x_right + 40, self.t_in
+        for x, t0, _, _ in self.stops:
+            if t >= t0:
+                prev_x, prev_t = x, t0
+                reach = x
+            else:
+                reach = prev_x + (x - prev_x) * ease_out(ramp(t, t0 - 0.3, 0.3))
+                break
+        else:
+            reach = self.stops[-1][0] - 40 * ease_out(ramp(t, self.stops[-1][1], 0.3))
+        w = int(self.x_right + 40 - reach)
+        if w > 4:
+            over(frame, rounded_rect(w, 8, 4, self.gold), self.x_right + 40, self.y + 80, opacity=fade, anchor=(1.0, 0.5))
+        for x, t0, (patch, meta), pill in self.stops:
+            if t < t0 - 0.05:
+                continue
+            p = ease_out_back(ramp(t, t0 - 0.05, 0.32), 2.4)
+            a = ramp(t, t0 - 0.05, 0.12) * fade
+            over(frame, self.dot, x, self.y + 80, opacity=a, scale=p)
+            wob = 0
+            if meta["ink_w"] < 60:                           # the '?' keeps wobbling
+                wob = math.sin((t - t0) * 7) * 0.06
+            sc = (0.6 + 0.4 * p) * (1 + wob)
+            over(frame, pill, x, self.y, opacity=a, scale=sc)
+            over(frame, patch, x, self.y + 22 * sc, opacity=a, scale=sc,
+                 anchor=((meta["ink_x"] + meta["ink_w"] / 2) / patch.shape[1], meta["baseline"] / patch.shape[0]))
+
+
+class NumberFlip(Layer):
+    """'<n> <label>' card; at t_flip the number is crossed out, drops away and the new number lands
+    with an overshoot (e.g. 3 -> 4 activities)."""
+
+    def __init__(self, n_from, n_to, label, font, t_in, t_flip, t_out, cx=540, cy=300, navy=(11, 27, 52, 240),
+                 gold=(212, 175, 55, 255), white=(255, 255, 255, 255)):
+        self.lab = render_text(label, font, 96, white, 800)
+        self.n0 = render_text(str(n_from), font, 150, gold, 900)
+        self.n1 = render_text(str(n_to), font, 150, gold, 900)
+        lw = self.lab[1]["ink_w"]
+        self.num_w = max(self.n0[1]["ink_w"], self.n1[1]["ink_w"])
+        total = lw + 40 + self.num_w
+        self.card = rounded_rect(int(total + 120), 210, 42, navy)
+        self.num_x = cx + total / 2 - self.num_w / 2          # number on the right (RTL)
+        self.lab_x = cx - total / 2 + lw / 2
+        self.cx, self.cy = cx, cy
+        self.gold = gold
+        self.t_in, self.t_flip, self.t_out = t_in, t_flip, t_out
+        self.tail = 0.3
+
+    @staticmethod
+    def _c(pm):
+        patch, m = pm
+        return ((m["ink_x"] + m["ink_w"] / 2) / patch.shape[1], (m["baseline"]) / patch.shape[0])
+
+    def draw(self, frame, t, info):
+        out = ramp(t, self.t_out, 0.25)
+        p = ease_out_back(ramp(t, self.t_in, 0.32))
+        a = ramp(t, self.t_in, 0.12) * (1 - out)
+        if a <= 0:
+            return
+        sc = 0.8 + 0.2 * p
+        over(frame, self.card, self.cx, self.cy, opacity=a, scale=sc)
+        base = self.cy + 50
+        over(frame, self.lab[0], self.lab_x, base, opacity=a, anchor=self._c(self.lab))
+        # cross-out sweep just before the flip, then old number falls, new one drops in
+        strike = ease_out(ramp(t, self.t_flip - 0.25, 0.2))
+        drop = ease_in(ramp(t, self.t_flip, 0.22))
+        if drop < 1:
+            over(frame, self.n0[0], self.num_x, base + drop * 120, opacity=a * (1 - drop), anchor=self._c(self.n0))
+            if strike > 0:
+                sw = int((self.num_w + 30) * strike)
+                if sw > 4:
+                    over(frame, rounded_rect(sw, 12, 6, (255, 255, 255, 255)), self.num_x + (self.num_w + 30) / 2,
+                         self.cy - 4, opacity=a * (1 - drop), anchor=(1.0, 0.5))
+        land = ramp(t, self.t_flip + 0.08, 0.3)
+        if land > 0:
+            s2 = 1.6 - 0.6 * ease_out_back(land, 2.0)
+            over(frame, self.n1[0], self.num_x, base - (1 - ease_out(land)) * 90, opacity=a * ramp(t, self.t_flip + 0.08, 0.1),
+                 scale=s2, anchor=self._c(self.n1))
+
+
+class DownArrows(Layer):
+    """Three gold chevrons cascading downward ('details below'), looping until t_out."""
+
+    def __init__(self, t_in, t_out, x=540, y=1530, gold=(212, 175, 55, 255), navy=(11, 27, 52, 255), size=96):
+        s_ = size
+        pts = [(12, 10), (s_ / 2, s_ * 0.6 - 12), (s_ - 12, 10)]
+        self.chev = _rgba_canvas(s_, int(s_ * 0.6), lambda g, s: (
+            g.line([(x * s, y * s) for x, y in pts], fill=navy, width=int(22 * s), joint="curve"),
+            g.line([(x * s, y * s) for x, y in pts], fill=gold, width=int(12 * s), joint="curve")))
+        self.t_in, self.t_out, self.x, self.y, self.size = t_in, t_out, x, y, size
+        self.tail = 0.3
+
+    def draw(self, frame, t, info):
+        fade = ramp(t, self.t_in, 0.2) * (1 - ramp(t, self.t_out, 0.25))
+        for k in range(3):
+            ph = ((t - self.t_in) * 1.6 - k * 0.22) % 1.0
+            a = math.sin(math.pi * ph) * fade
+            over(frame, self.chev, self.x, self.y + k * self.size * 0.55 + ph * 18, opacity=a)
