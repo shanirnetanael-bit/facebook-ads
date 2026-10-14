@@ -30,18 +30,34 @@ def text_size(text, font_path, size, weight=None):
 
 
 @lru_cache(maxsize=2048)
-def render_text(text, font_path, size, color, weight=None, shadow=(0, 0, 0, 0), shadow_blur=8, shadow_dy=4, pad=24):
+def render_text(text, font_path, size, color, weight=None, shadow=(0, 0, 0, 0), shadow_blur=8, shadow_dy=4, pad=24,
+                stroke=0, stroke_color=(0, 0, 0, 255)):
     """color / shadow: RGBA tuples. Returns (rgba uint8 HxWx4, meta) where meta has
     ink_x (left edge of the ink), baseline (y of the text baseline) and ink_w, all in patch pixels,
     so words of different shapes line up on one baseline."""
     f = get_font(font_path, size, weight)
     l, t, r, b = f.getbbox(text, anchor="ls", direction="rtl", language="he")
+    pad = pad + stroke
     w, h = r - l + 2 * pad, b - t + 2 * pad
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).text((pad - l, pad - t), text, font=f, fill=255, anchor="ls", direction="rtl", language="he")
     a = np.asarray(mask).astype(np.float32) / 255.0
     out = np.zeros((h, w, 4), np.float32)
-    if shadow[3] > 0:
+    if stroke:
+        sm = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(sm).text((pad - l, pad - t), text, font=f, fill=255, anchor="ls", direction="rtl",
+                                language="he", stroke_width=stroke, stroke_fill=255)
+        sa = np.asarray(sm).astype(np.float32) / 255.0
+        if shadow[3] > 0:
+            sh = np.roll(cv2.GaussianBlur(sa, (0, 0), shadow_blur), shadow_dy, axis=0) * (shadow[3] / 255.0)
+            out[..., :3] = np.array(shadow[:3], np.float32) / 255.0
+            out[..., 3] = sh
+        sca = sa * stroke_color[3] / 255.0
+        a_o = sca + out[..., 3] * (1 - sca)
+        out[..., :3] = (np.array(stroke_color[:3], np.float32) / 255.0 * sca[..., None]
+                        + out[..., :3] * (out[..., 3] * (1 - sca))[..., None]) / np.maximum(a_o[..., None], 1e-6)
+        out[..., 3] = a_o
+    elif shadow[3] > 0:
         sh = np.roll(cv2.GaussianBlur(a, (0, 0), shadow_blur), shadow_dy, axis=0) * (shadow[3] / 255.0)
         out[..., :3] = np.array(shadow[:3], np.float32) / 255.0
         out[..., 3] = sh

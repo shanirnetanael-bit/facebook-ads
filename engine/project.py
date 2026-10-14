@@ -24,6 +24,7 @@ class Project:
         self.layers = []          # callables layer(frame, t_out, ctx, info) -> frame
         self.sfx = []             # (out_time, samples, gain_db)
         self.tm = None
+        self.camera = None        # engine.camera.Camera, applied to picture and mask alike
 
     # --- timeline ----------------------------------------------------------------------------
     def cut_silences(self, **kw):
@@ -58,7 +59,23 @@ class Project:
     def frame_at(self, t, ctx):
         sources = self.tm.sources_at(t)
         frame = blend_sources(ctx["src"], sources)
-        info = {"sources": sources, "src_t": sources[-1][0] if len(sources) == 1 else max(sources, key=lambda s: s[1])[0]}
+        src_t = max(sources, key=lambda s: s[1])[0]
+        M = z = None
+        if self.camera is not None:
+            M, z = self.camera.matrix(t)
+            frame = self.camera.warp(frame, M, z)
+        cache = {}
+
+        def mask():
+            """Person alpha (float HxW) for this output frame, warped like the picture. Lazy + cached."""
+            if "m" not in cache:
+                m = ctx["mask"].get(ctx["src"].index(src_t)) if ctx["mask"] is not None else None
+                if m is not None and M is not None:
+                    m = self.camera.warp(m, M, z)
+                cache["m"] = m
+            return cache["m"]
+
+        info = {"sources": sources, "src_t": src_t, "mask": mask}
         for layer in self.layers:
             frame = layer(frame, t, ctx, info)
         return frame

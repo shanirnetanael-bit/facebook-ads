@@ -162,6 +162,10 @@ class Captions:
             dy = (1 - ease_out_cubic(ramp(t, t0, s["word_pop"]))) * s["rise"]
             nxt = g["words"][k + 1]["start"] if k + 1 < len(g["words"]) else w["end"] + 0.12
             hl = min(ramp(t, w["start"] - 0.03, 0.06), 1 - ramp(t, nxt - 0.03, 0.08))
+            emph = w.get("i") in s.get("emph", ())
+            if emph:                       # key word: stays gold, bigger pop, gold underline sweeps in
+                hl = 1.0
+                sc = 0.6 + 0.4 * ease_out_back(ramp(t, t0, s["word_pop"] + 0.04), 2.6)
             base, meta = self._word_patch(w["disp"], s["color"])
             cx = (w["x0"] + w["x1"]) / 2
             ax = (meta["ink_x"] + meta["ink_w"] / 2) / base.shape[1]
@@ -172,3 +176,9 @@ class Captions:
             if hl > 0:
                 acc, _ = self._word_patch(w["disp"], s["accent"])
                 over(frame, acc, cx, ycen, opacity=a * hl, scale=sc, anchor=(ax, ay))
+            if emph:
+                u = ease_out_cubic(ramp(t, w["start"] + 0.05, 0.25))
+                uw = int((w["x1"] - w["x0"]) * u)
+                if uw > 4:
+                    over(frame, rounded_rect(uw, 6, 3, s["accent"]), w["x1"], baseline + 14,
+                         opacity=a, anchor=(1.0, 0.5))
