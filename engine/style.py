@@ -1,4 +1,4 @@
-"""House style for headlines: butter-yellow Gveret Levin with a light black halo.
+"""House style for Stav's marketing reels: butter-yellow Gveret Levin with a light black halo.
 
 headline() builds a Title in that look, so every reel opens with the same signature title.
 """
