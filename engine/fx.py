@@ -82,10 +82,11 @@ class Title(Layer):
     Each part rises + fades in on its own word; everything lifts away at t_out."""
 
     def __init__(self, parts, font, size, y_base, t_out, cx=540, weight=900, space=None, rise=70,
-                 stroke=0, stroke_color=(0, 0, 0, 255), shadow=(0, 0, 0, 0)):
+                 stroke=0, stroke_color=(0, 0, 0, 255), shadow=(0, 0, 0, 0), shadow_blur=10, shadow_dy=6):
         self.parts = []
         for text, col, t0 in parts:
-            patch, meta = render_text(text, font, size, col, weight, shadow=shadow, shadow_blur=10, shadow_dy=6,
+            patch, meta = render_text(text, font, size, col, weight, shadow=shadow, shadow_blur=shadow_blur,
+                                      shadow_dy=shadow_dy,
                                       stroke=stroke, stroke_color=stroke_color)
             self.parts.append((patch, meta, t0))
         space = size * 0.28 if space is None else space
