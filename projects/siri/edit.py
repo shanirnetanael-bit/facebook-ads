@@ -1,4 +1,5 @@
-"""Siri reel - Stav driving, asks Siri to call, Siri answers in Hebrew, the call rings, she laughs to camera.
+"""Siri reel (comedy) - driving, she says the name deliberately mangled ("ס-שה") so Siri will dial the right
+person; Siri repeats it, the call rings, she laughs to camera.
 The source already has burned-in captions, so this edit adds framing, a hook headline, pacing and sound.
 
 Layout: the 1080x1500 source sits as a rounded card on a blurred copy of itself inside a 1080x1920 frame;
@@ -119,11 +120,11 @@ def build(source):
     p.camera = cam
 
     t_freeze = o(LAST)
-    hook = headline([("כשסירי", 0.15), ("מדברת", 0.40), ("עברית...", 0.65)], y_base=245,
-                    t_out=t_freeze - 0.05, size=108)
-    cta = headline([("עקבו", t_freeze + 0.15), ("לעוד", t_freeze + 0.30), ("רגעים", t_freeze + 0.45),
-                    ("כאלה", t_freeze + 0.60)], y_base=245, t_out=1e9, size=108)
-    p.layers += [hook, cta]
+    hook = headline([("ככה", 0.15), ("מדברים", 0.40), ("עם", 0.60), ("סירי:", 0.80)], y_base=245,
+                    t_out=t_freeze - 0.05, size=112)
+    payoff = headline([("וזה", t_freeze + 0.15), ("עובד.", t_freeze + 0.45)], y_base=250,
+                      t_out=1e9, size=130)
+    p.layers += [hook, payoff]
 
     p.sfx += [
         (0.0, sfx.whoosh(0.5, 400, 5000), -18),
@@ -135,7 +136,7 @@ def build(source):
         (o(LAUGH) - 0.08, sfx.whoosh(0.4, 500, 4000), -20),
         (t_freeze, sfx.pop(800, 450, 0.1), -18),
         (t_freeze + 0.1, sfx.shimmer(1.2), -22),
-        *[(t_freeze + 0.15 + 0.15 * k, sfx.tick(), -26) for k in range(4)],
+        (t_freeze + 0.45, sfx.pop(1000, 500, 0.09), -20),
     ]
     p.prepare_audio(WORK)
     return p
