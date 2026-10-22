@@ -11,7 +11,7 @@ Retention design (open loop -> anticipation -> payoff):
   ~3.8s  the "method": the mangled name, punched in
   ~5.0s  "זה יעבוד?"            - asked in the silence before Siri answers; the answer is held back
   ~6.4s  Siri repeats the mangled name, 📞 pops in and rings with the ringback
-  ring   the tip: "לא רוצה שסירי תחייג למנשה? / תדברי בדיוק כמו שהיא הוגה."
+  ring   the punchline: "אלא אם את רוצה / שהיא תחייג לנטשה." (נטשה rhymes with סשה)
   end    she laughs to camera, freeze on the smile (peak-end)
 
 Run from the repo root:  python -m projects.siri.edit <source.mov>
@@ -195,10 +195,10 @@ def build(source):
                  t_out=o(ASK) - 0.1, size=100),
         headline([("זה", o(ASK)), ("יעבוד?", o(ASK) + 0.25)], y_base=Y, t_out=o(SIRI_REPLY) - 0.05, size=140),
         RingingEmoji(860, 760, t_in=o(SIRI_REPLY), t_out=o(LAUGH) - 0.15, ring_from=o(RING)),
-        headline([("לא", tip), ("רוצה", tip + 0.12), ("שסירי", tip + 0.24), ("תחייג", tip + 0.36),
-                  ("למנשה?", tip + 0.5)], y_base=Y - 20, t_out=1e9, size=80),
-        headline([("תדברי", tip + 1.3), ("בדיוק", tip + 1.42), ("כמו", tip + 1.54), ("שהיא", tip + 1.66),
-                  ("הוגה.", tip + 1.8)], y_base=Y + 95, t_out=1e9, size=80),
+        headline([("אלא", tip), ("אם", tip + 0.15), ("את", tip + 0.3), ("רוצה", tip + 0.45)],
+                 y_base=Y - 10, t_out=1e9, size=110),
+        headline([("שהיא", tip + 1.1), ("תחייג", tip + 1.3), ("לנטשה.", tip + 1.65)],
+                 y_base=Y + 125, t_out=1e9, size=110),
     ]
 
     # sound: no zoom whooshes - only soft accents on what appears
@@ -206,9 +206,8 @@ def build(source):
         (o(HEY_SIRI) - 0.05, sfx.shimmer(0.7), -30),
         (o(SIRI_REPLY), sfx.pop(1100, 600, 0.08), -24),          # 📞 lands
         (o(ASK), sfx.tick(), -24),                               # "זה יעבוד?"
-        (tip + 0.5, sfx.pop(900, 450, 0.1), -22),                # "...למנשה?"
-        (tip + 1.8, sfx.pop(1000, 500, 0.09), -22),              # "...הוגה."
-        (tip + 1.85, sfx.shimmer(1.1), -28),
+        (tip + 1.65, sfx.pop(1000, 500, 0.09), -20),             # "...לנטשה."
+        (tip + 1.7, sfx.shimmer(1.1), -28),
     ]
     p.prepare_audio(WORK)
     return p
