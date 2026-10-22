@@ -9,9 +9,10 @@ dials, and back to her when she laughs to camera.
 Retention design (open loop -> anticipation -> payoff):
   0.0s   "ככה מדברים עם סירי:"  - promise of a method, visible on frame 1 (also the cover)
   ~3.8s  the "method": the mangled name, punched in
-  ~6.4s  Siri answers, 📞 pops in and rings with the ringback - will it work?
-  ~8.8s  "זה יעבוד?"            - the question is said out loud, the answer is held back
-  end    she laughs to camera, freeze, "וזה עובד." - the loop closes on a smile (peak-end)
+  ~5.0s  "זה יעבוד?"            - asked in the silence before Siri answers; the answer is held back
+  ~6.4s  Siri repeats the mangled name, 📞 pops in and rings with the ringback
+  ring   the tip: "לא רוצה שסירי תחייג למנשה? / תדברי בדיוק כמו שהיא הוגה."
+  end    she laughs to camera, freeze on the smile (peak-end)
 
 Run from the repo root:  python -m projects.siri.edit <source.mov>
 """
@@ -52,7 +53,8 @@ GAP = (8.8, 9.9)       # dead air while the call connects - cut
 RING = 10.7            # ringback tone (425 Hz) - in the original audio
 LAUGH = 11.8           # she turns to the camera laughing
 LAST = 12.45
-HOLD = 1.4             # freeze on the laugh
+HOLD = 2.8             # freeze on the laugh (time to read the tip)
+ASK = 4.95             # right after the mangled "ס-שה נייד", before Siri answers
 
 FACE = (380, 650)      # zoom centre while she talks (source px)
 FACE_TURNED = (120, 680)
@@ -187,22 +189,26 @@ def build(source):
     p.camera = cam
 
     Y = 470
+    tip = o(RING)                                              # the call rings -> the tip
     p.layers += [
         headline([("ככה", 0.0), ("מדברים", 0.25), ("עם", 0.45), ("סירי:", 0.65)], y_base=Y,
-                 t_out=o(SIRI_NAME) + 0.7, size=100),
-        headline([("זה", o(GAP[0]) + 0.05), ("יעבוד?", o(GAP[0]) + 0.3)], y_base=Y, t_out=o(LAUGH) - 0.1,
-                 size=140),
-        RingingEmoji(860, 700, t_in=o(SIRI_REPLY), t_out=o(LAUGH) - 0.15, ring_from=o(RING)),
-        headline([("וזה", t_freeze + 0.1), ("עובד.", t_freeze + 0.4)], y_base=Y, t_out=1e9, size=150),
+                 t_out=o(ASK) - 0.1, size=100),
+        headline([("זה", o(ASK)), ("יעבוד?", o(ASK) + 0.25)], y_base=Y, t_out=o(SIRI_REPLY) - 0.05, size=140),
+        RingingEmoji(860, 760, t_in=o(SIRI_REPLY), t_out=o(LAUGH) - 0.15, ring_from=o(RING)),
+        headline([("לא", tip), ("רוצה", tip + 0.12), ("שסירי", tip + 0.24), ("תחייג", tip + 0.36),
+                  ("למנשה?", tip + 0.5)], y_base=Y - 20, t_out=1e9, size=80),
+        headline([("תדברי", tip + 1.3), ("בדיוק", tip + 1.42), ("כמו", tip + 1.54), ("שהיא", tip + 1.66),
+                  ("הוגה.", tip + 1.8)], y_base=Y + 95, t_out=1e9, size=80),
     ]
 
     # sound: no zoom whooshes - only soft accents on what appears
     p.sfx += [
         (o(HEY_SIRI) - 0.05, sfx.shimmer(0.7), -30),
         (o(SIRI_REPLY), sfx.pop(1100, 600, 0.08), -24),          # 📞 lands
-        (o(GAP[0]) + 0.05, sfx.tick(), -26),                     # "זה יעבוד?"
-        (t_freeze + 0.4, sfx.pop(900, 450, 0.1), -20),           # "וזה עובד."
-        (t_freeze + 0.45, sfx.shimmer(1.1), -26),
+        (o(ASK), sfx.tick(), -24),                               # "זה יעבוד?"
+        (tip + 0.5, sfx.pop(900, 450, 0.1), -22),                # "...למנשה?"
+        (tip + 1.8, sfx.pop(1000, 500, 0.09), -22),              # "...הוגה."
+        (tip + 1.85, sfx.shimmer(1.1), -28),
     ]
     p.prepare_audio(WORK)
     return p
