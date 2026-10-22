@@ -3,16 +3,16 @@ person; Siri repeats it, the call rings, she laughs to camera.
 The source already has burned-in captions, so this edit adds framing, headlines, pacing and sound.
 
 Format: full-screen Instagram Reel, 1080x1920 (9:16), 30 fps. The 1080x1500 source is scaled to fill the
-height and a moving crop window pans across it: on her face while she talks, over to the phone while it
-dials, and back to her when she laughs to camera.
+height; the crop window stays centred (so the burned-in captions sit mid-screen) and only slides left
+when she turns to the camera to laugh.
 
 Retention design (open loop -> anticipation -> payoff):
   0.0s   "ככה מדברים עם סירי:"  - promise of a method, visible on frame 1 (also the cover)
   ~3.8s  the "method": the mangled name, punched in
   ~5.0s  "זה יעבוד?"            - asked in the silence before Siri answers; the answer is held back
   ~6.4s  Siri repeats the mangled name, 📞 pops in and rings with the ringback
-  ring   the punchline: "אלא אם את רוצה / שהיא תחייג לנטשה." (נטשה rhymes with סשה)
-  end    she laughs to camera, freeze on the smile (peak-end)
+  ring   the punchline: "אלא אם את רוצה / שהיא תחייג למאשה." (מאשה rhymes with סשה)
+  end    she laughs to camera (boomerang, no freeze) and a 😉 pops in (peak-end)
 
 Run from the repo root:  python -m projects.siri.edit <source.mov>
 """
@@ -41,7 +41,7 @@ EMOJI_FONT = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
 SRC_W, SRC_H = 1080, 1500
 SCALE = 1920 / SRC_H                     # fill the reel height
 WIDE = int(round(SRC_W * SCALE))         # 1382 px wide before the crop window
-MAX_PAN = WIDE - 1080
+CENTER = (WIDE - 1080) // 2  # crop window centred: the burned-in captions stay mid-screen
 
 # Source moments (seconds), read off the burned-in captions and the audio
 HEY_SIRI = 0.75        # "היי Siri"
@@ -53,7 +53,8 @@ GAP = (8.8, 9.9)       # dead air while the call connects - cut
 RING = 10.7            # ringback tone (425 Hz) - in the original audio
 LAUGH = 11.8           # she turns to the camera laughing
 LAST = 12.45
-HOLD = 2.8             # freeze on the laugh (time to read the tip)
+HOLD = 1.8             # after the last frame: boomerang on the laugh (no frozen face)
+BOOM = 0.7             # seconds of the laugh played back and forth
 ASK = 4.95             # right after the mangled "ס-שה נייד", before Siri answers
 
 FACE = (380, 650)      # zoom centre while she talks (source px)
@@ -89,6 +90,19 @@ def emoji_patch(ch, size_px):
     out[..., :3] = rgba[..., :3] * (ca / np.maximum(a_o, 1e-6))[..., None]
     out[..., 3] = a_o * 255
     return np.clip(out, 0, 255).astype(np.uint8)
+
+
+class PopEmoji(Layer):
+    """An emoji that pops in (overshoot) and keeps a gentle wobble, e.g. the closing wink."""
+
+    def __init__(self, ch, x, y, t_in, size=230):
+        self.patch = emoji_patch(ch, size)
+        self.x, self.y, self.t_in = x, y, t_in
+
+    def draw(self, frame, t, info):
+        sc = ease_out_back(ramp(t, self.t_in, 0.4))
+        ang = 10 * math.sin(2 * math.pi * 1.6 * (t - self.t_in)) * math.exp(-1.5 * (t - self.t_in))
+        over(frame, rotate_rgba(self.patch, ang), self.x, self.y, opacity=min(1.0, sc * 1.5), scale=max(sc, 0.01))
 
 
 class RingingEmoji(Layer):
@@ -139,7 +153,12 @@ class SiriReel:
         return {"src": SourceReader(self.source)}
 
     def frame_at(self, t, ctx):
-        src = blend_sources(ctx["src"], self.tm.sources_at(t))
+        t_end = self.tm.segs[-1].out_start
+        if t >= t_end:                                         # boomerang instead of a frozen frame
+            ph = (t - t_end) % (2 * BOOM)
+            src = ctx["src"].at(LAST - (ph if ph < BOOM else 2 * BOOM - ph)).copy()
+        else:
+            src = blend_sources(ctx["src"], self.tm.sources_at(t))
         if src.shape[:2] != (SRC_H, SRC_W):
             src = cv2.resize(src, (SRC_W, SRC_H), interpolation=cv2.INTER_AREA)
         self.camera.focus = (keyframes(t, self.focus_keys), keyframes(t, self.focus_y_keys))
@@ -171,9 +190,8 @@ def build(source):
     o = p.o
     t_freeze = o(LAST)
 
-    # crop window: on her face -> over to the phone while it dials -> back to her for the laugh
-    p.pan_keys = [(0, 110), (o(SIRI_REPLY), 110), (o(SIRI_REPLY) + 0.8, MAX_PAN),
-                  (o(LAUGH) - 0.1, MAX_PAN), (o(LAUGH) + 0.45, 0)]
+    # crop window: centred, then slides to her as she turns to the camera
+    p.pan_keys = [(0, CENTER), (o(LAUGH) - 0.1, CENTER), (o(LAUGH) + 0.45, 0)]
     p.focus_keys = [(0, FACE[0]), (o(LAUGH) - 0.1, FACE[0]), (o(LAUGH) + 0.45, FACE_TURNED[0])]
     p.focus_y_keys = [(0, FACE[1]), (o(LAUGH) - 0.1, FACE[1]), (o(LAUGH) + 0.45, FACE_TURNED[1])]
 
@@ -195,10 +213,11 @@ def build(source):
                  t_out=o(ASK) - 0.1, size=100),
         headline([("זה", o(ASK)), ("יעבוד?", o(ASK) + 0.25)], y_base=Y, t_out=o(SIRI_REPLY) - 0.05, size=140),
         RingingEmoji(860, 760, t_in=o(SIRI_REPLY), t_out=o(LAUGH) - 0.15, ring_from=o(RING)),
-        headline([("אלא", tip), ("אם", tip + 0.15), ("את", tip + 0.3), ("רוצה", tip + 0.45)],
+        headline([("אלא", tip), ("אם", tip + 0.12), ("את", tip + 0.24), ("רוצה", tip + 0.36)],
                  y_base=Y - 10, t_out=1e9, size=110),
-        headline([("שהיא", tip + 1.1), ("תחייג", tip + 1.3), ("לנטשה.", tip + 1.65)],
+        headline([("שהיא", tip + 0.7), ("תחייג", tip + 0.85), ("למאשה.", tip + 1.05)],
                  y_base=Y + 125, t_out=1e9, size=110),
+        PopEmoji("😉", 400, 760, t_in=t_freeze + 0.05),
     ]
 
     # sound: no zoom whooshes - only soft accents on what appears
@@ -206,8 +225,9 @@ def build(source):
         (o(HEY_SIRI) - 0.05, sfx.shimmer(0.7), -30),
         (o(SIRI_REPLY), sfx.pop(1100, 600, 0.08), -24),          # 📞 lands
         (o(ASK), sfx.tick(), -24),                               # "זה יעבוד?"
-        (tip + 1.65, sfx.pop(1000, 500, 0.09), -20),             # "...לנטשה."
-        (tip + 1.7, sfx.shimmer(1.1), -28),
+        (tip + 1.05, sfx.pop(1000, 500, 0.09), -20),             # "...למאשה."
+        (t_freeze + 0.05, sfx.pop(800, 420, 0.1), -22),          # 😉
+        (t_freeze + 0.1, sfx.shimmer(1.1), -28),
     ]
     p.prepare_audio(WORK)
     return p
